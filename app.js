@@ -24,7 +24,10 @@ app.use(function(req, res, next) {
     const allowedOrigins = [
         'https://talent-flow.technexus.com.mx',
         'http://localhost:8080',
-        'http://localhost:3000'
+        'http://localhost:3000',
+        'https://localhost:8080',  // Añadir HTTPS para localhost
+        'https://127.0.0.1:8080',  // Añadir dirección IP con HTTPS
+        'http://127.0.0.1:8080'    // Añadir dirección IP con HTTP
     ];
     
     const origin = req.headers.origin;
@@ -55,17 +58,34 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Inicializar endpoints al arrancar la aplicación
+const availableEndpoints = services.FFmpegService.getEndpointsList(endpoints);
+
+// Configurar los endpoints de conversión inmediatamente
+setupEndpoints(availableEndpoints);
+
+// Endpoint de prueba CORS
+app.get('/test-cors', (req, res) => {
+    res.json({
+        success: true,
+        message: 'CORS está configurado correctamente',
+        receivedOrigin: req.headers.origin || 'No origin header received'
+    });
+});
+
 // Endpoint para listar endpoints disponibles
 app.get('/endpoints', function(req, res) {
-    const availableEndpoints = services.FFmpegService.getEndpointsList(endpoints);
     res.json(availableEndpoints);
-    
-    // Configurar los endpoints de conversión
-    setupEndpoints(availableEndpoints);
 });
 
 // Función para configurar un endpoint de conversión
 function setupConversionEndpoint(path, ffmpegParams) {
+    winston.info(JSON.stringify({
+        action: 'setup_endpoint',
+        path: path,
+        extension: ffmpegParams.extension
+    }));
+    
     app.post(path, function(req, res) {
         services.FFmpegService.processConversionRequest(
             req, 

@@ -23,12 +23,22 @@ class FFmpegService {
      * @returns {Promise} - Promesa que se resuelve cuando se completa el proceso
      */
     static processConversionRequest(req, res, ffmpegParams, uploadDir, fileSizeLimit) {
+        winston.info(JSON.stringify({
+            action: 'process_request',
+            path: req.path,
+            origin: req.headers.origin || 'No origin header',
+            contentType: req.headers['content-type'] || 'No content-type header'
+        }));
+        
         return new Promise((resolve, reject) => {
             // Procesar la subida del archivo
             UploadService.processUpload(req, {
                 fileSizeLimit,
                 uploadDir,
                 onError: (err, statusCode) => {
+                    // Asegurar que las cabeceras CORS se envían en error
+                    this.setCORSHeaders(req, res);
+                    
                     res.status(statusCode || 500).json({
                         error: 'Upload failed',
                         message: err.toString()
@@ -53,6 +63,9 @@ class FFmpegService {
                         this.sendFileToClient(res, outputFilePath, fileName, extension, resolve, reject);
                     },
                     onError: (err, statusCode) => {
+                        // Asegurar que las cabeceras CORS se envían en error
+                        this.setCORSHeaders(req, res);
+                        
                         res.status(statusCode || 500).json({
                             error: 'Conversion failed',
                             message: err.toString()
@@ -79,6 +92,9 @@ class FFmpegService {
                 
                 // Asegurarse de que no enviamos múltiples respuestas
                 if (!res.headersSent) {
+                    // Asegurar que las cabeceras CORS se envían en error
+                    this.setCORSHeaders(req, res);
+                    
                     res.status(500).json({
                         error: 'Process failed',
                         message: err.toString()
@@ -87,6 +103,35 @@ class FFmpegService {
                 reject(err);
             });
         });
+    }
+    
+    /**
+     * Establece las cabeceras CORS para una respuesta
+     * 
+     * @param {Object} req - Objeto request de Express
+     * @param {Object} res - Objeto response de Express
+     */
+    static setCORSHeaders(req, res) {
+        if (res.headersSent) return;
+        
+        const origin = req.headers.origin;
+        if (origin) {
+            const allowedOrigins = [
+                'https://talent-flow.technexus.com.mx',
+                'http://localhost:8080',
+                'http://localhost:3000',
+                'https://localhost:8080',
+                'https://127.0.0.1:8080',
+                'http://127.0.0.1:8080'
+            ];
+            
+            if (allowedOrigins.includes(origin)) {
+                res.header('Access-Control-Allow-Origin', origin);
+                res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+                res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+                res.header('Access-Control-Allow-Credentials', 'true');
+            }
+        }
     }
 
     /**
@@ -107,6 +152,11 @@ class FFmpegService {
 
         // Construir nombre de archivo para descarga
         const downloadName = originalName.replace(/\.[^/.]+$/, '') + '.' + extension;
+
+        // Asegurarse de que no hay problemas CORS
+        if (!res.headersSent) {
+            this.setCORSHeaders(res.req, res);
+        }
 
         // Enviar el archivo
         res.download(filePath, downloadName, (err) => {
