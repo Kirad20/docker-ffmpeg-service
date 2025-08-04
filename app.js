@@ -18,6 +18,33 @@ const services = require('./app/services');
 const app = express();
 app.use(compression());
 
+// Configurar CORS para permitir solicitudes desde orígenes específicos
+app.use(function(req, res, next) {
+    // Lista de orígenes permitidos
+    const allowedOrigins = [
+        'https://talent-flow.technexus.com.mx',
+        'http://localhost:8080',
+        'http://localhost:3000'
+    ];
+    
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+    }
+    
+    // Permitir métodos y cabeceras específicos
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
+    // Manejar solicitudes OPTIONS (preflight)
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    
+    next();
+});
+
 // Configurar logging
 winston.remove(winston.transports.Console);
 winston.add(winston.transports.Console, {'timestamp': true});
