@@ -1,4 +1,4 @@
-FROM jrottenberg/ffmpeg:ubuntu
+FROM jrottenberg/ffmpeg:5.1-ubuntu2004
 
 MAINTAINER Paul Visco <paul.visco@gmail.com>
 
@@ -21,7 +21,7 @@ MAINTAINER Paul Visco <paul.visco@gmail.com>
 RUN apt-get update && apt-get install -y \
     curl \
     git \
-    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -57,11 +57,18 @@ RUN chmod 777 /usr/src/app/uploads
 
 #Install Dependencies
 COPY package.json /usr/src/app
-RUN npm install
+# Check for potential issues before installing
+RUN npm --version && node --version
+# Install dependencies with production flag
+RUN npm install --production
 
 #Bundle app source
 COPY . /usr/src/app
 
 EXPOSE 3000
+# Add healthcheck to verify the service is running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/ || exit 1
+
 ENTRYPOINT []
 CMD [ "node", "app.js" ]
