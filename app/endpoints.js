@@ -56,14 +56,22 @@ exports.types = {
         extension: 'webm',
         description: 'Convert video to WebM format (VP9)',
         outputOptions: [
-            '-codec:v libvpx-vp9',
-            '-crf 30',         // Balance calidad/tamaño
-            '-b:v 0',          // Usar solo CRF
-            '-deadline good',  // Balance velocidad/calidad
-            '-cpu-used 2',     // Multihilo
-            '-vf scale=-2:720', // HD
-            '-codec:a libopus',
-            '-b:a 128k',
+            '-codec:v libvpx',         // VP8 es más rápido y compatible que VP9
+            '-quality good',           // Balance calidad/velocidad
+            '-cpu-used 4',             // Balance rendimiento/calidad (0-16, donde 16 es más rápido)
+            '-b:v 1000k',              // Bitrate de video objetivo
+            '-qmin 10',                // Calidad mínima
+            '-qmax 42',                // Calidad máxima
+            '-maxrate 1500k',          // Bitrate máximo
+            '-bufsize 2000k',          // Tamaño del buffer
+            '-vf scale=-2:720',        // HD
+            '-deadline good',          // Balance velocidad/calidad
+            '-threads 0',              // Usar todos los hilos disponibles
+            '-codec:a libvorbis',      // Codec de audio (más rápido que opus)
+            '-b:a 128k',               // Bitrate audio
+            '-ar 44100',               // Frecuencia de muestreo estándar
+            '-ac 2',                   // 2 canales de audio
+            '-max_muxing_queue_size 9999', // Prevenir errores de cola de multiplexación
         ],
     },
     'compress-mp4': {
@@ -89,20 +97,26 @@ exports.types = {
         extension: 'webm',
         description: 'Compress video to WebM format with ~60% size reduction',
         outputOptions: [
-            '-codec:v libvpx',    // Usar VP8 en lugar de VP9 (más rápido y compatible)
-            '-quality realtime',  // Priorizar velocidad sobre calidad
-            '-cpu-used 8',        // Máxima velocidad (0-8, 8 es más rápido)
-            '-deadline realtime', // Máxima velocidad
-            '-vf scale=-2:360',   // Resolución reducida
-            '-b:v 500k',          // Bitrate de video reducido
-            '-auto-alt-ref 0',    // Desactivar referencia alternativa para mayor velocidad
-            '-lag-in-frames 0',   // Desactivar lag para mayor velocidad
-            '-threads 0',         // Usar todos los hilos disponibles
-            '-codec:a libvorbis', // Codec de audio más rápido que opus
-            '-b:a 64k',           // Bitrate audio reducido
-            '-ac 2',              // 2 canales de audio
-            '-error-resilient 1', // Resiliencia a errores
+            '-codec:v libvpx',         // VP8 es más rápido y compatible que VP9
+            '-quality realtime',       // Priorizar velocidad sobre calidad
+            '-cpu-used 16',            // Máxima velocidad (0-16, mayor es más rápido)
+            '-b:v 400k',               // Bitrate de video objetivo bajo para mejor compresión
+            '-minrate 200k',           // Bitrate mínimo
+            '-maxrate 600k',           // Bitrate máximo
+            '-bufsize 800k',           // Tamaño del buffer
+            '-vf scale=-2:360',        // Resolución reducida para mejor compresión
+            '-deadline realtime',      // Máxima velocidad
+            '-auto-alt-ref 0',         // Desactivar referencia alternativa para mayor velocidad
+            '-lag-in-frames 0',        // Desactivar lag para mayor velocidad
+            '-error-resilient 1',      // Resiliencia a errores
+            '-threads 0',              // Usar todos los hilos disponibles
+            '-codec:a libvorbis',      // Codec de audio más rápido que opus
+            '-b:a 64k',                // Bitrate audio reducido
+            '-ar 22050',               // Frecuencia de muestreo reducida para mejor compresión
+            '-ac 1',                   // Mono para mejor compresión
             '-max_muxing_queue_size 9999', // Evitar errores de cola
+            '-slices 4',               // División para paralelización
+            '-row-mt 1',               // Multihilo por fila
         ],
     },
     'hevc': {

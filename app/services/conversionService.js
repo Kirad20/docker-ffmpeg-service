@@ -191,11 +191,31 @@ class ConversionService {
                 action: 'ffmpeg_version',
                 version: ffmpegVersion
             }));
+
+            // Configurar las rutas de ffmpeg y ffprobe si están definidas como variables de entorno
+            if (process.env.FFMPEG_PATH) {
+                require('fluent-ffmpeg').setFfmpegPath(process.env.FFMPEG_PATH);
+                winston.info(JSON.stringify({
+                    action: 'ffmpeg_path_set',
+                    path: process.env.FFMPEG_PATH
+                }));
+            }
+
+            if (process.env.FFPROBE_PATH) {
+                require('fluent-ffmpeg').setFfprobePath(process.env.FFPROBE_PATH);
+                winston.info(JSON.stringify({
+                    action: 'ffprobe_path_set',
+                    path: process.env.FFPROBE_PATH
+                }));
+            }
+
+            return true;
         } catch (error) {
             winston.error(JSON.stringify({
                 action: 'ffmpeg_version',
                 error: error.toString()
             }));
+            return false;
         }
     }
 
@@ -230,7 +250,19 @@ class ConversionService {
         }));
 
         try {
+            // Verificar que ffmpeg está disponible
+            if (!this.checkFFmpegVersion()) {
+                throw new Error('FFmpeg no está instalado o no es accesible');
+            }
+
+            // Crear una nueva instancia de ffmpeg
             const ffmpegCommand = ffmpeg(inputFile);
+
+            // Loggear las opciones que se utilizarán
+            winston.info(JSON.stringify({
+                action: 'ffmpeg_options',
+                options: outputOptions
+            }));
 
             // Configurar listener de progreso
             ffmpegCommand.on('progress', progress => {
@@ -247,13 +279,7 @@ class ConversionService {
                 }
             });
 
-            // Agregar opciones específicas
-            const ffmpegOptionsLog = [...outputOptions];
-            winston.info(JSON.stringify({
-                action: 'ffmpeg_options',
-                options: ffmpegOptionsLog
-            }));
-
+            // Configurar opciones específicas para asegurar la compatibilidad
             ffmpegCommand
                 .renice(15)
                 .outputOptions(outputOptions)
@@ -364,6 +390,7 @@ class ConversionService {
                     }
                     resolve(outputFile);
                 })
+                // Utilizar el método save() para iniciar la conversión
                 .save(outputFile);
         } catch (error) {
             winston.error(JSON.stringify({
