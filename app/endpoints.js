@@ -92,18 +92,18 @@ exports.types = {
             '-codec:v libvpx-vp9',
             '-b:v 0',             // No limitar bitrate, usar CRF
             '-crf 35',            // Mayor valor = más compresión
-            '-deadline good',     // Balance entre velocidad/calidad
-            '-cpu-used 2',        // Multihilo
+            '-deadline realtime', // Más rápido (opciones: good, realtime, best)
+            '-cpu-used 4',        // Valores más altos = más rápido (0-5)
             '-tile-columns 2',    // Paralelización para decodificación
             '-frame-parallel 1',  // Codificación en paralelo
-            '-auto-alt-ref 1',    // Mejora la compresión
-            '-lag-in-frames 25',  // Mejora calidad a costa de latencia
+            '-threads 0',         // Usar todos los hilos disponibles
             '-r 24',              // Framerate estándar
-            '-vf scale=-2:480',   // Resolución reducida (SD)
+            '-vf scale=-2:360',   // Resolución reducida para mayor velocidad
             '-codec:a libopus',
-            '-b:a 96k',           // Bitrate audio reducido
+            '-b:a 64k',           // Bitrate audio reducido
             '-ac 2',              // Asegura 2 canales de audio
-            '-mapping_family 1',  // Optimiza contenedor WebM
+            '-pass 1',            // Una sola pasada en lugar de dos
+            '-speed 4',           // Velocidad de codificación más rápida (0-5)
         ],
     },
     'hevc': {

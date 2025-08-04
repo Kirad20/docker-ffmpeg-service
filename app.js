@@ -142,42 +142,159 @@ function setupConversionEndpoint(path, ffmpegParams) {
                 from: savedFile,
                 to: outputFile,
             }));
+            // Establecer un timeout para la operación completa
+            let conversionTimeout = setTimeout(() => {
+                winston.error(JSON.stringify({
+                    type: 'ffmpeg',
+                    message: 'Conversion timeout after ' + (consts.ffmpegTimeout / 1000) + ' seconds',
+                }));
+                
+                try {
+                    // Intentar limpiar archivos
+                    if (fs.existsSync(savedFile)) {
+                        fs.unlinkSync(savedFile);
+                    }
+                } catch (e) {
+                    winston.error(JSON.stringify({
+                        type: 'cleanup',
+                        message: e.toString(),
+                    }));
+                }
+                
+                if (!res.headersSent) {
+                    res.status(504).json({
+                        error: 'Conversion timeout',
+                        message: 'The operation took too long to complete'
+                    });
+                }
+            }, consts.ffmpegTimeout || 600000); // 10 minutos por defecto si no está definido
+            
             let ffmpegConvertCommand = ffmpeg(savedFile);
+            
+            // Agregar un listener para el progreso
+            ffmpegConvertCommand.on('progress', function(progress) {
+                winston.info(JSON.stringify({
+                    action: 'ffmpeg progress',
+                    frames: progress.frames,
+                    fps: progress.currentFps,
+                    percent: progress.percent,
+                    targetSize: progress.targetSize,
+                    timemark: progress.timemark
+                }));
+            });
+            
             ffmpegConvertCommand
                     .renice(15)
                     .outputOptions(ffmpegParams.outputOptions)
-                    .on('error', function(err) {
+                    .on('start', function(commandLine) {
+                        winston.info(JSON.stringify({
+                            action: 'ffmpeg start',
+                            command: commandLine
+                        }));
+                    })
+                    .on('stderr', function(stderrLine) {
+                        winston.info(JSON.stringify({
+                            action: 'ffmpeg stderr',
+                            output: stderrLine
+                        }));
+                    })
+                    .on('error', function(err, stdout, stderr) {
+                        // Cancelar el timeout ya que tenemos un resultado
+                        clearTimeout(conversionTimeout);
+                        
                         let log = JSON.stringify({
                             type: 'ffmpeg',
-                            message: err,
+                            message: err.toString(),
+                            stdout: stdout,
+                            stderr: stderr
                         });
                         winston.error(log);
-                        fs.unlinkSync(savedFile);
-                        res.writeHead(500, {'Connection': 'close'});
-                        res.end(log);
+                        
+                        try {
+                            if (fs.existsSync(savedFile)) {
+                                fs.unlinkSync(savedFile);
+                            }
+                        } catch (e) {
+                            winston.error(JSON.stringify({
+                                type: 'cleanup',
+                                message: e.toString(),
+                            }));
+                        }
+                        
+                        if (!res.headersSent) {
+                            res.status(500).json({
+                                error: 'Conversion failed',
+                                message: err.toString()
+                            });
+                        }
                     })
-                    .on('end', function() {
-                        fs.unlinkSync(savedFile);
+                    .on('end', function(stdout, stderr) {
+                        // Cancelar el timeout ya que tenemos un resultado
+                        clearTimeout(conversionTimeout);
+                        
+                        winston.info(JSON.stringify({
+                            action: 'ffmpeg complete',
+                            stdout: stdout,
+                            stderr: stderr
+                        }));
+                        
+                        try {
+                            if (fs.existsSync(savedFile)) {
+                                fs.unlinkSync(savedFile);
+                            }
+                        } catch (e) {
+                            winston.error(JSON.stringify({
+                                type: 'cleanup',
+                                message: e.toString(),
+                            }));
+                        }
+                        
                         winston.info(JSON.stringify({
                             action: 'starting download to client',
-                            file: savedFile,
+                            file: outputFile,
                         }));
 
-                        res.download(outputFile, null, function(err) {
+                        // Verificar que el archivo de salida existe antes de intentar descargarlo
+                        if (!fs.existsSync(outputFile)) {
+                            winston.error(JSON.stringify({
+                                type: 'download',
+                                message: 'Output file does not exist: ' + outputFile,
+                            }));
+                            
+                            if (!res.headersSent) {
+                                return res.status(500).json({
+                                    error: 'Conversion failed',
+                                    message: 'Output file was not created'
+                                });
+                            }
+                            return;
+                        }
+
+                        res.download(outputFile, fileName + '.' + ffmpegParams.extension, function(err) {
                             if (err) {
                                 winston.error(JSON.stringify({
                                     type: 'download',
-                                    message: err,
+                                    message: err.toString(),
                                 }));
                             }
+                            
                             winston.info(JSON.stringify({
                                 action: 'deleting',
                                 file: outputFile,
                             }));
-                            if (fs.unlinkSync(outputFile)) {
-                                winston.info(JSON.stringify({
-                                    action: 'deleted',
-                                    file: outputFile,
+                            
+                            try {
+                                if (fs.existsSync(outputFile)) {
+                                    fs.unlinkSync(outputFile);
+                                    winston.info(JSON.stringify({
+                                        action: 'deleted',
+                                        file: outputFile,
+                                    }));
+                                }
+                            } catch (e) {
+                                winston.error(JSON.stringify({
+                                    type: 'cleanup',
+                                    message: e.toString(),
                                 }));
                             }
                         });
