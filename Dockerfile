@@ -1,4 +1,4 @@
-FROM jrottenberg/ffmpeg:5.1-ubuntu2004
+FROM jrottenberg/ffmpeg:6.0-ubuntu2204
 
 MAINTAINER Paul Visco <paul.visco@gmail.com>
 
@@ -7,7 +7,7 @@ MAINTAINER Paul Visco <paul.visco@gmail.com>
 # A Docker image to convert audio and video for web using web API
 #
 #   with
-#     - Latest FFMPEG (built)
+#     - FFmpeg 6.0 (latest stable)
 #     - NodeJS
 #     - fluent-ffmpeg
 #
@@ -21,7 +21,7 @@ MAINTAINER Paul Visco <paul.visco@gmail.com>
 RUN apt-get update && apt-get install -y \
     curl \
     git \
-    && curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

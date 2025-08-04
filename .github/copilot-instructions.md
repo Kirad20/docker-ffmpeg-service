@@ -9,7 +9,7 @@ This is a Node.js Express API service that provides HTTP endpoints for convertin
 - **app.js**: Main application entry point that sets up Express routes and middleware
 - **app/constants.js**: Configuration parameters (file size limits, port, timeout)
 - **app/endpoints.js**: Defines conversion endpoints and FFmpeg parameters
-- **Dockerfile**: Container configuration based on jrottenberg/ffmpeg:centos
+- **Dockerfile**: Container configuration based on jrottenberg/ffmpeg:6.0-ubuntu2204
 
 ### Data Flow
 1. Client uploads file via POST request to an endpoint (e.g., `/mp3`)
@@ -44,6 +44,8 @@ The service provides specialized endpoints for video compression:
 
 - `/compress-mp4`: Compresses video to MP4 format with approximately 60% size reduction
 - `/compress-webm`: Compresses video to WebM format with approximately 60% size reduction
+- `/hevc`: Converts video to H.265/HEVC for better compression (70-80% reduction)
+- `/av1`: Converts video to AV1 format for highest compression (up to 85% reduction)
 
 Example usage:
 ```bash
@@ -52,6 +54,12 @@ curl -F "file=@input.mp4" 127.0.0.1:3000/compress-mp4 > compressed.mp4
 
 # Compress a video to WebM with ~60% size reduction
 curl -F "file=@input.mp4" 127.0.0.1:3000/compress-webm > compressed.webm
+
+# Convert video to HEVC (H.265) format
+curl -F "file=@input.mp4" 127.0.0.1:3000/hevc > output.mp4
+
+# Convert video to AV1 format
+curl -F "file=@input.mp4" 127.0.0.1:3000/av1 > output.mp4
 ```
 
 ### Error Handling
