@@ -91,13 +91,18 @@ exports.types = {
         outputOptions: [
             '-codec:v libvpx',    // Usar VP8 en lugar de VP9 (más rápido y compatible)
             '-quality realtime',  // Priorizar velocidad sobre calidad
-            '-cpu-used 5',        // Máxima velocidad (0-5)
-            '-vf scale=-2:360',   // Resolución reducida
+            '-cpu-used 8',        // Máxima velocidad (0-8, 8 es más rápido)
             '-deadline realtime', // Máxima velocidad
+            '-vf scale=-2:360',   // Resolución reducida
+            '-b:v 500k',          // Bitrate de video reducido
+            '-auto-alt-ref 0',    // Desactivar referencia alternativa para mayor velocidad
+            '-lag-in-frames 0',   // Desactivar lag para mayor velocidad
             '-threads 0',         // Usar todos los hilos disponibles
-            '-codec:a libopus',
+            '-codec:a libvorbis', // Codec de audio más rápido que opus
             '-b:a 64k',           // Bitrate audio reducido
             '-ac 2',              // 2 canales de audio
+            '-error-resilient 1', // Resiliencia a errores
+            '-max_muxing_queue_size 9999', // Evitar errores de cola
         ],
     },
     'hevc': {

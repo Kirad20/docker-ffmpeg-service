@@ -24,18 +24,31 @@ class FFmpegService {
      */
     static processConversionRequest(req, res, ffmpegParams, uploadDir, fileSizeLimit) {
         winston.info(JSON.stringify({
-            action: 'process_request',
+            action: 'process_request_start',
             path: req.path,
             origin: req.headers.origin || 'No origin header',
-            contentType: req.headers['content-type'] || 'No content-type header'
+            contentType: req.headers['content-type'] || 'No content-type header',
+            method: req.method,
+            outputFormat: ffmpegParams.extension || 'unknown'
         }));
         
         return new Promise((resolve, reject) => {
             // Procesar la subida del archivo
+            winston.info(JSON.stringify({
+                action: 'starting_upload_processing',
+                path: req.path
+            }));
+            
             UploadService.processUpload(req, {
                 fileSizeLimit,
                 uploadDir,
                 onError: (err, statusCode) => {
+                    winston.error(JSON.stringify({
+                        action: 'upload_error',
+                        error: err.toString(),
+                        statusCode: statusCode
+                    }));
+                    
                     // Asegurar que las cabeceras CORS se envían en error
                     this.setCORSHeaders(req, res);
                     
@@ -48,7 +61,16 @@ class FFmpegService {
             })
             .then(uploadResult => {
                 // Archivo subido correctamente, proceder con la conversión
-                const { originalName, savedPath } = uploadResult;
+                const { originalName, savedPath, size } = uploadResult;
+                
+                winston.info(JSON.stringify({
+                    action: 'upload_complete_starting_conversion',
+                    originalName: originalName,
+                    savedPath: savedPath,
+                    size: size,
+                    targetFormat: ffmpegParams.extension
+                }));
+                
                 const outputFile = `${savedPath}.${ffmpegParams.extension}`;
                 
                 // Convertir el archivo
@@ -59,10 +81,24 @@ class FFmpegService {
                     outputOptions: ffmpegParams.outputOptions,
                     extension: ffmpegParams.extension,
                     onSuccess: (outputFilePath, fileName, extension) => {
+                        winston.info(JSON.stringify({
+                            action: 'conversion_success',
+                            outputFile: outputFilePath,
+                            fileName: fileName,
+                            extension: extension
+                        }));
+                        
                         // Enviar el archivo al cliente
                         this.sendFileToClient(res, outputFilePath, fileName, extension, resolve, reject);
                     },
                     onError: (err, statusCode) => {
+                        winston.error(JSON.stringify({
+                            action: 'conversion_error',
+                            error: err.toString(),
+                            statusCode: statusCode,
+                            inputFile: savedPath
+                        }));
+                        
                         // Asegurar que las cabeceras CORS se envían en error
                         this.setCORSHeaders(req, res);
                         
@@ -87,7 +123,8 @@ class FFmpegService {
             .catch(err => {
                 winston.error(JSON.stringify({
                     type: 'process_error',
-                    message: err.toString()
+                    message: err.toString(),
+                    path: req.path
                 }));
                 
                 // Asegurarse de que no enviamos múltiples respuestas

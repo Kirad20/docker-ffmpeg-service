@@ -73,6 +73,97 @@ app.get('/test-cors', (req, res) => {
     });
 });
 
+// Endpoint de diagnóstico FFmpeg
+app.get('/diagnose', (req, res) => {
+    // Verificar el directorio de uploads
+    const uploadsInfo = {
+        path: uploadsDir,
+        exists: fs.existsSync(uploadsDir),
+        writable: false,
+        files: []
+    };
+    
+    try {
+        if (uploadsInfo.exists) {
+            fs.accessSync(uploadsDir, fs.constants.W_OK);
+            uploadsInfo.writable = true;
+            
+            // Listar archivos en el directorio (máximo 10)
+            const files = fs.readdirSync(uploadsDir).slice(0, 10);
+            for (const file of files) {
+                const filePath = path.join(uploadsDir, file);
+                const stats = fs.statSync(filePath);
+                uploadsInfo.files.push({
+                    name: file,
+                    size: stats.size,
+                    isDirectory: stats.isDirectory(),
+                    created: stats.birthtime
+                });
+            }
+            
+            if (files.length > 10) {
+                uploadsInfo.files.push({ note: `...y ${files.length - 10} archivos más` });
+            }
+        }
+    } catch (error) {
+        uploadsInfo.error = error.toString();
+    }
+    
+    // Verificar FFmpeg
+    let ffmpegInfo = { installed: false };
+    try {
+        const ffmpegVersion = require('child_process').execSync('ffmpeg -version').toString().split('\n')[0];
+        ffmpegInfo = {
+            installed: true,
+            version: ffmpegVersion
+        };
+    } catch (error) {
+        ffmpegInfo.error = error.toString();
+    }
+    
+    // Verificar fluent-ffmpeg
+    let fluentFFmpegInfo = { installed: false };
+    try {
+        fluentFFmpegInfo = {
+            installed: true,
+            version: require('fluent-ffmpeg/package.json').version
+        };
+    } catch (error) {
+        fluentFFmpegInfo.error = error.toString();
+    }
+    
+    // Verificar otros paquetes necesarios
+    const busboy = require('busboy/package.json').version;
+    const winston = require('winston/package.json').version;
+    
+    res.json({
+        environment: {
+            node: process.version,
+            platform: process.platform,
+            arch: process.arch,
+            pid: process.pid,
+            uptime: process.uptime()
+        },
+        uploads: uploadsInfo,
+        ffmpeg: ffmpegInfo,
+        fluentFFmpeg: fluentFFmpegInfo,
+        packages: {
+            busboy,
+            winston
+        },
+        endpoints: {
+            count: Object.keys(endpoints.types).length,
+            list: Object.keys(endpoints.types)
+        },
+        constants: {
+            port: consts.port,
+            fileSizeLimit: consts.fileSizeLimit,
+            timeout: consts.timeout,
+            ffmpegTimeout: consts.ffmpegTimeout
+        }
+    });
+});
+
 // Endpoint para listar endpoints disponibles
 app.get('/endpoints', function(req, res) {
     res.json(availableEndpoints);

@@ -134,17 +134,48 @@ class ConversionService {
      * @returns {Promise} - Promise que se resuelve con las estadísticas del archivo
      */
     static verifyInputFile(inputFile) {
+        winston.info(JSON.stringify({
+            action: 'verifying_input_file',
+            path: inputFile
+        }));
+        
         return new Promise((resolve, reject) => {
             fs.stat(inputFile, (err, stats) => {
                 if (err) {
                     winston.error(JSON.stringify({
                         action: 'file_check',
                         path: inputFile,
-                        error: err.toString()
+                        error: err.toString(),
+                        error_code: err.code,
+                        exists: false
                     }));
                     reject(new Error(`Could not access the uploaded file: ${err.message}`));
                 } else {
-                    resolve(stats);
+                    // Intentar leer un fragmento del archivo para verificar permisos
+                    try {
+                        const fd = fs.openSync(inputFile, 'r');
+                        const buffer = Buffer.alloc(1024);
+                        const bytesRead = fs.readSync(fd, buffer, 0, 1024, 0);
+                        fs.closeSync(fd);
+                        
+                        winston.info(JSON.stringify({
+                            action: 'file_check_read_test',
+                            path: inputFile,
+                            bytesRead: bytesRead,
+                            successful: true
+                        }));
+                        
+                        resolve(stats);
+                    } catch (readError) {
+                        winston.error(JSON.stringify({
+                            action: 'file_check_read_test',
+                            path: inputFile,
+                            error: readError.toString(),
+                            error_code: readError.code,
+                            successful: false
+                        }));
+                        reject(new Error(`File exists but cannot be read: ${readError.message}`));
+                    }
                 }
             });
         });
@@ -190,83 +221,171 @@ class ConversionService {
             tryAlternateMethod
         } = options;
 
-        const ffmpegCommand = ffmpeg(inputFile);
+        winston.info(JSON.stringify({
+            action: 'ffmpeg_conversion_start',
+            method: 'fluent-ffmpeg',
+            inputFile: inputFile,
+            outputFile: outputFile,
+            outputFormat: extension
+        }));
 
-        // Configurar listener de progreso
-        ffmpegCommand.on('progress', progress => {
+        try {
+            const ffmpegCommand = ffmpeg(inputFile);
+
+            // Configurar listener de progreso
+            ffmpegCommand.on('progress', progress => {
+                winston.info(JSON.stringify({
+                    action: 'ffmpeg_progress',
+                    frames: progress.frames,
+                    fps: progress.currentFps,
+                    percent: progress.percent,
+                    timemark: progress.timemark
+                }));
+
+                if (typeof onProgress === 'function') {
+                    onProgress(progress);
+                }
+            });
+
+            // Agregar opciones específicas
+            const ffmpegOptionsLog = [...outputOptions];
             winston.info(JSON.stringify({
-                action: 'ffmpeg_progress',
-                frames: progress.frames,
-                fps: progress.currentFps,
-                percent: progress.percent,
-                timemark: progress.timemark
+                action: 'ffmpeg_options',
+                options: ffmpegOptionsLog
             }));
 
-            if (typeof onProgress === 'function') {
-                onProgress(progress);
-            }
-        });
+            ffmpegCommand
+                .renice(15)
+                .outputOptions(outputOptions)
+                .on('start', commandLine => {
+                    winston.info(JSON.stringify({
+                        action: 'ffmpeg_start',
+                        command: commandLine
+                    }));
+                })
+                .on('stderr', stderrLine => {
+                    winston.info(JSON.stringify({
+                        action: 'ffmpeg_stderr',
+                        output: stderrLine
+                    }));
+                })
+                .on('error', (err, stdout, stderr) => {
+                    // Si ya estamos usando el método alternativo, no hacer nada
+                    if (usingAlternateMethod) return;
 
-        ffmpegCommand
-            .renice(15)
-            .outputOptions(outputOptions)
-            .on('start', commandLine => {
+                    winston.error(JSON.stringify({
+                        type: 'ffmpeg_error',
+                        message: err.toString(),
+                        stdout: stdout ? stdout.substring(0, 500) : 'No stdout',
+                        stderr: stderr ? stderr.substring(0, 500) : 'No stderr'
+                    }));
+
+                    // Intentar el método alternativo
+                    winston.info(JSON.stringify({
+                        action: 'trying_alternate_method',
+                        reason: err.toString().substring(0, 200)
+                    }));
+                    
+                    tryAlternateMethod();
+                })
+                .on('end', (stdout, stderr) => {
+                    // Si ya estamos usando el método alternativo, no hacer nada
+                    if (usingAlternateMethod) return;
+
+                    // Cancelar el timeout
+                    clearTimeout(timeoutId);
+
+                    winston.info(JSON.stringify({
+                        action: 'ffmpeg_complete',
+                        stdout: stdout ? stdout.substring(0, 500) : 'No stdout',
+                        stderr: stderr ? stderr.substring(0, 500) : 'No stderr'
+                    }));
+
+                    // Limpiar archivo de entrada
+                    this.cleanupFile(inputFile);
+
+                    // Verificar archivo de salida
+                    try {
+                        if (!fs.existsSync(outputFile)) {
+                            const outputError = new Error('Output file was not created');
+                            winston.error(JSON.stringify({
+                                action: 'output_file_check',
+                                exists: false,
+                                path: outputFile,
+                                error: outputError.toString()
+                            }));
+                            this.handleError(outputError, inputFile, 500, onError);
+                            reject(outputError);
+                            return;
+                        }
+                        
+                        const outputStats = fs.statSync(outputFile);
+                        winston.info(JSON.stringify({
+                            action: 'output_file_check',
+                            exists: true,
+                            size: outputStats.size,
+                            path: outputFile
+                        }));
+                        
+                        if (outputStats.size === 0) {
+                            const emptyOutputError = new Error('Output file is empty');
+                            winston.error(JSON.stringify({
+                                action: 'output_file_check',
+                                exists: true,
+                                size: 0,
+                                path: outputFile,
+                                error: emptyOutputError.toString()
+                            }));
+                            this.handleError(emptyOutputError, inputFile, 500, onError);
+                            reject(emptyOutputError);
+                            return;
+                        }
+                    } catch (error) {
+                        winston.error(JSON.stringify({
+                            action: 'output_file_check',
+                            error: error.toString(),
+                            path: outputFile
+                        }));
+                        this.handleError(error, inputFile, 500, onError);
+                        reject(error);
+                        return;
+                    }
+
+                    // Éxito!
+                    winston.info(JSON.stringify({
+                        action: 'conversion_successful',
+                        outputFile: outputFile,
+                        fileName: fileName,
+                        extension: extension
+                    }));
+                    
+                    if (typeof onSuccess === 'function') {
+                        onSuccess(outputFile, fileName, extension);
+                    }
+                    resolve(outputFile);
+                })
+                .save(outputFile);
+        } catch (error) {
+            winston.error(JSON.stringify({
+                action: 'ffmpeg_init_error',
+                error: error.toString(),
+                stack: error.stack
+            }));
+            
+            // Si hay un error al inicializar FFmpeg, intentamos el método alternativo
+            if (!usingAlternateMethod) {
                 winston.info(JSON.stringify({
-                    action: 'ffmpeg_start',
-                    command: commandLine
+                    action: 'trying_alternate_method_after_init_error',
+                    reason: error.toString().substring(0, 200)
                 }));
-            })
-            .on('stderr', stderrLine => {
-                winston.info(JSON.stringify({
-                    action: 'ffmpeg_stderr',
-                    output: stderrLine
-                }));
-            })
-            .on('error', (err, stdout, stderr) => {
-                // Si ya estamos usando el método alternativo, no hacer nada
-                if (usingAlternateMethod) return;
-
-                winston.error(JSON.stringify({
-                    type: 'ffmpeg_error',
-                    message: err.toString(),
-                    stdout: stdout,
-                    stderr: stderr
-                }));
-
-                // Intentar el método alternativo
+                
                 tryAlternateMethod();
-            })
-            .on('end', (stdout, stderr) => {
-                // Si ya estamos usando el método alternativo, no hacer nada
-                if (usingAlternateMethod) return;
-
-                // Cancelar el timeout
-                clearTimeout(timeoutId);
-
-                winston.info(JSON.stringify({
-                    action: 'ffmpeg_complete',
-                    stdout: stdout,
-                    stderr: stderr
-                }));
-
-                // Limpiar archivo de entrada
-                this.cleanupFile(inputFile);
-
-                // Verificar archivo de salida
-                if (!fs.existsSync(outputFile)) {
-                    const outputError = new Error('Output file was not created');
-                    this.handleError(outputError, inputFile, 500, onError);
-                    reject(outputError);
-                    return;
-                }
-
-                // Éxito!
-                if (typeof onSuccess === 'function') {
-                    onSuccess(outputFile, fileName, extension);
-                }
-                resolve(outputFile);
-            })
-            .save(outputFile);
+            } else {
+                // Si ya estábamos usando el método alternativo, reportamos el error
+                this.handleError(error, inputFile, 500, onError);
+                reject(error);
+            }
+        }
     }
 
     /**

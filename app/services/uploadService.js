@@ -65,6 +65,9 @@ class UploadService {
                         error: err.message
                     }));
                     
+                    // Asegurarse de consumir el stream para que el evento 'finish' se dispare
+                    file.resume();
+                    
                     if (typeof onError === 'function') {
                         onError(err, 413); // 413 Payload Too Large
                     }
@@ -100,8 +103,9 @@ class UploadService {
 
                 writeStream.on('finish', () => {
                     winston.info(JSON.stringify({
-                        action: 'saved',
-                        path: savedFile
+                        action: 'writeStream_finish',
+                        path: savedFile,
+                        size: bytes
                     }));
                 });
 
@@ -110,6 +114,9 @@ class UploadService {
                         type: 'write_error',
                         message: err.toString()
                     }));
+                    
+                    // Asegurarse de consumir el stream para que el evento 'finish' se dispare
+                    file.resume();
                     
                     if (typeof onError === 'function') {
                         onError(err, 500);
@@ -127,8 +134,47 @@ class UploadService {
                 winston.info(JSON.stringify({
                     action: 'upload complete',
                     name: fileName,
-                    bytes: bytes
+                    bytes: bytes,
+                    savedPath: savedFile
                 }));
+
+                // Verificar que el archivo existe y tiene contenido
+                try {
+                    const stats = fs.statSync(savedFile);
+                    winston.info(JSON.stringify({
+                        action: 'file_verification',
+                        exists: true,
+                        size: stats.size,
+                        path: savedFile
+                    }));
+                    
+                    if (stats.size === 0) {
+                        const emptyFileError = new Error('Uploaded file is empty');
+                        winston.error(JSON.stringify({
+                            type: 'empty_file_error',
+                            message: emptyFileError.message,
+                            path: savedFile
+                        }));
+                        
+                        if (typeof onError === 'function') {
+                            onError(emptyFileError, 400);
+                        }
+                        reject(emptyFileError);
+                        return;
+                    }
+                } catch (error) {
+                    winston.error(JSON.stringify({
+                        type: 'file_verification_error',
+                        message: error.toString(),
+                        path: savedFile
+                    }));
+                    
+                    if (typeof onError === 'function') {
+                        onError(error, 500);
+                    }
+                    reject(error);
+                    return;
+                }
 
                 const uploadResult = {
                     originalName: fileName,
