@@ -89,21 +89,15 @@ exports.types = {
         extension: 'webm',
         description: 'Compress video to WebM format with ~60% size reduction',
         outputOptions: [
-            '-codec:v libvpx-vp9',
-            '-b:v 0',             // No limitar bitrate, usar CRF
-            '-crf 35',            // Mayor valor = más compresión
-            '-deadline realtime', // Más rápido (opciones: good, realtime, best)
-            '-cpu-used 4',        // Valores más altos = más rápido (0-5)
-            '-tile-columns 2',    // Paralelización para decodificación
-            '-frame-parallel 1',  // Codificación en paralelo
+            '-codec:v libvpx',    // Usar VP8 en lugar de VP9 (más rápido y compatible)
+            '-quality realtime',  // Priorizar velocidad sobre calidad
+            '-cpu-used 5',        // Máxima velocidad (0-5)
+            '-vf scale=-2:360',   // Resolución reducida
+            '-deadline realtime', // Máxima velocidad
             '-threads 0',         // Usar todos los hilos disponibles
-            '-r 24',              // Framerate estándar
-            '-vf scale=-2:360',   // Resolución reducida para mayor velocidad
             '-codec:a libopus',
             '-b:a 64k',           // Bitrate audio reducido
-            '-ac 2',              // Asegura 2 canales de audio
-            '-pass 1',            // Una sola pasada en lugar de dos
-            '-speed 4',           // Velocidad de codificación más rápida (0-5)
+            '-ac 2',              // 2 canales de audio
         ],
     },
     'hevc': {

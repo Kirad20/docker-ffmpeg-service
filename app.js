@@ -1,331 +1,124 @@
-const fs = require('fs');
-const express = require('express');
-const app = express();
-const Busboy = require('busboy');
-const compression = require('compression');
-const ffmpeg = require('fluent-ffmpeg');
-const uniqueFilename = require('unique-filename');
-const consts = require(__dirname + '/app/constants.js');
-const endpoints = require(__dirname + '/app/endpoints.js');
-const winston = require('winston');
+/**
+ * FFmpeg Web Service API
+ * 
+ * Un servicio web para convertir archivos de audio/video usando Node.js, Express y FFmpeg.
+ * Basado en jrottenberg/ffmpeg 6.0 con Ubuntu 22.04.
+ */
 
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
+const compression = require('compression');
+const winston = require('winston');
+const consts = require('./app/constants.js');
+const endpoints = require('./app/endpoints.js');
+const services = require('./app/services');
+
+// Inicializar Express
+const app = express();
 app.use(compression());
+
+// Configurar logging
 winston.remove(winston.transports.Console);
 winston.add(winston.transports.Console, {'timestamp': true});
 
-// Add endpoint to list available endpoints
+// Asegurar que el directorio de uploads existe
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Endpoint para listar endpoints disponibles
 app.get('/endpoints', function(req, res) {
-    const availableEndpoints = [];
-    
-    // Add standard conversion endpoints
-    for (let prop in endpoints.types) {
-        if (endpoints.types.hasOwnProperty(prop)) {
-            let path = '';
-            const type = endpoints.types[prop];
-            
-            // Format endpoint URL based on the type
-            if (prop.startsWith('compress-')) {
-                // Compression endpoints
-                const format = prop.split('-')[1];
-                path = `/video/compress/to/${format}`;
-            } else if (prop === 'hevc' || prop === 'av1') {
-                // Advanced video codecs
-                path = `/video/compress/to/${prop}`;
-            } else if (prop === 'mp3' || prop === 'm4a' || prop === 'wav') {
-                // Audio formats
-                path = `/convert/audio/to/${prop}`;
-            } else if (prop === 'mp4' || prop === 'webm') {
-                // Video formats
-                path = `/convert/video/to/${prop}`;
-            } else if (prop === 'jpg') {
-                // Image formats
-                path = `/convert/image/to/${prop}`;
-            } else {
-                // Fallback for other types
-                path = `/${prop}`;
-            }
-            
-            // Register the formatted endpoint
-            availableEndpoints.push({
-                path: path,
-                methods: ['POST'],
-                description: type.description || `Convert to ${prop} format`
-            });
-            
-            // Map the endpoint to the original function
-            setupConversionEndpoint(path, endpoints.types[prop]);
-        }
-    }
-    
-    // Add other endpoints
-    availableEndpoints.push({ path: '/', methods: ['GET'], description: 'API Documentation' });
-    availableEndpoints.push({ path: '/endpoints', methods: ['GET'], description: 'List available endpoints' });
-    
+    const availableEndpoints = services.FFmpegService.getEndpointsList(endpoints);
     res.json(availableEndpoints);
+    
+    // Configurar los endpoints de conversión
+    setupEndpoints(availableEndpoints);
 });
 
-// Function to setup a conversion endpoint
+// Función para configurar un endpoint de conversión
 function setupConversionEndpoint(path, ffmpegParams) {
     app.post(path, function(req, res) {
-        let hitLimit = false;
-        let fileName = '';
-        let bytes = 0;
-        let savedFile = uniqueFilename(__dirname + '/uploads/');
-        let busboy = new Busboy({
-            headers: req.headers,
-            limits: {
-                files: 1,
-                fileSize: consts.fileSizeLimit,
-        }});
-        busboy.on('filesLimit', function() {
+        services.FFmpegService.processConversionRequest(
+            req, 
+            res, 
+            ffmpegParams, 
+            uploadsDir, 
+            consts.fileSizeLimit
+        ).catch(error => {
             winston.error(JSON.stringify({
-                type: 'filesLimit',
-                message: 'Upload file size limit hit',
+                type: 'unhandled_error',
+                path: path,
+                message: error.toString()
             }));
-        });
-
-        busboy.on('file', function(
-            fieldname,
-            file,
-            filename,
-            encoding,
-            mimetype
-        ) {
-            file.on('limit', function(file) {
-                hitLimit = true;
-                let err = {file: filename, error: 'exceeds max size limit'};
-                err = JSON.stringify(err);
-                winston.error(err);
-                res.writeHead(500, {'Connection': 'close'});
-                res.end(err);
-            });
-            let log = {
-                file: filename,
-                encoding: encoding,
-                mimetype: mimetype,
-            };
-            winston.info(JSON.stringify(log));
-            file.on('data', function(data) {
-                bytes += data.length;
-            });
-            file.on('end', function(data) {
-                log.bytes = bytes;
-                winston.info(JSON.stringify(log));
-            });
-
-            fileName = filename;
-            winston.info(JSON.stringify({
-                action: 'Uploading',
-                name: fileName,
-            }));
-            let written = file.pipe(fs.createWriteStream(savedFile));
-
-            if (written) {
-                winston.info(JSON.stringify({
-                    action: 'saved',
-                    path: savedFile,
-                }));
+            
+            // Asegurar que enviamos una respuesta si no se ha enviado ya
+            if (!res.headersSent) {
+                res.status(500).json({
+                    error: 'Internal server error',
+                    message: 'An unexpected error occurred'
+                });
             }
         });
-        busboy.on('finish', function() {
-            if (hitLimit) {
-                fs.unlinkSync(savedFile);
-                return;
-            }
-            winston.info(JSON.stringify({
-                action: 'upload complete',
-                name: fileName,
-            }));
-            let outputFile = savedFile + '.' + ffmpegParams.extension;
-            winston.info(JSON.stringify({
-                action: 'begin conversion',
-                from: savedFile,
-                to: outputFile,
-            }));
-            // Establecer un timeout para la operación completa
-            let conversionTimeout = setTimeout(() => {
-                winston.error(JSON.stringify({
-                    type: 'ffmpeg',
-                    message: 'Conversion timeout after ' + (consts.ffmpegTimeout / 1000) + ' seconds',
-                }));
-                
-                try {
-                    // Intentar limpiar archivos
-                    if (fs.existsSync(savedFile)) {
-                        fs.unlinkSync(savedFile);
-                    }
-                } catch (e) {
-                    winston.error(JSON.stringify({
-                        type: 'cleanup',
-                        message: e.toString(),
-                    }));
-                }
-                
-                if (!res.headersSent) {
-                    res.status(504).json({
-                        error: 'Conversion timeout',
-                        message: 'The operation took too long to complete'
-                    });
-                }
-            }, consts.ffmpegTimeout || 600000); // 10 minutos por defecto si no está definido
-            
-            let ffmpegConvertCommand = ffmpeg(savedFile);
-            
-            // Agregar un listener para el progreso
-            ffmpegConvertCommand.on('progress', function(progress) {
-                winston.info(JSON.stringify({
-                    action: 'ffmpeg progress',
-                    frames: progress.frames,
-                    fps: progress.currentFps,
-                    percent: progress.percent,
-                    targetSize: progress.targetSize,
-                    timemark: progress.timemark
-                }));
-            });
-            
-            ffmpegConvertCommand
-                    .renice(15)
-                    .outputOptions(ffmpegParams.outputOptions)
-                    .on('start', function(commandLine) {
-                        winston.info(JSON.stringify({
-                            action: 'ffmpeg start',
-                            command: commandLine
-                        }));
-                    })
-                    .on('stderr', function(stderrLine) {
-                        winston.info(JSON.stringify({
-                            action: 'ffmpeg stderr',
-                            output: stderrLine
-                        }));
-                    })
-                    .on('error', function(err, stdout, stderr) {
-                        // Cancelar el timeout ya que tenemos un resultado
-                        clearTimeout(conversionTimeout);
-                        
-                        let log = JSON.stringify({
-                            type: 'ffmpeg',
-                            message: err.toString(),
-                            stdout: stdout,
-                            stderr: stderr
-                        });
-                        winston.error(log);
-                        
-                        try {
-                            if (fs.existsSync(savedFile)) {
-                                fs.unlinkSync(savedFile);
-                            }
-                        } catch (e) {
-                            winston.error(JSON.stringify({
-                                type: 'cleanup',
-                                message: e.toString(),
-                            }));
-                        }
-                        
-                        if (!res.headersSent) {
-                            res.status(500).json({
-                                error: 'Conversion failed',
-                                message: err.toString()
-                            });
-                        }
-                    })
-                    .on('end', function(stdout, stderr) {
-                        // Cancelar el timeout ya que tenemos un resultado
-                        clearTimeout(conversionTimeout);
-                        
-                        winston.info(JSON.stringify({
-                            action: 'ffmpeg complete',
-                            stdout: stdout,
-                            stderr: stderr
-                        }));
-                        
-                        try {
-                            if (fs.existsSync(savedFile)) {
-                                fs.unlinkSync(savedFile);
-                            }
-                        } catch (e) {
-                            winston.error(JSON.stringify({
-                                type: 'cleanup',
-                                message: e.toString(),
-                            }));
-                        }
-                        
-                        winston.info(JSON.stringify({
-                            action: 'starting download to client',
-                            file: outputFile,
-                        }));
-
-                        // Verificar que el archivo de salida existe antes de intentar descargarlo
-                        if (!fs.existsSync(outputFile)) {
-                            winston.error(JSON.stringify({
-                                type: 'download',
-                                message: 'Output file does not exist: ' + outputFile,
-                            }));
-                            
-                            if (!res.headersSent) {
-                                return res.status(500).json({
-                                    error: 'Conversion failed',
-                                    message: 'Output file was not created'
-                                });
-                            }
-                            return;
-                        }
-
-                        res.download(outputFile, fileName + '.' + ffmpegParams.extension, function(err) {
-                            if (err) {
-                                winston.error(JSON.stringify({
-                                    type: 'download',
-                                    message: err.toString(),
-                                }));
-                            }
-                            
-                            winston.info(JSON.stringify({
-                                action: 'deleting',
-                                file: outputFile,
-                            }));
-                            
-                            try {
-                                if (fs.existsSync(outputFile)) {
-                                    fs.unlinkSync(outputFile);
-                                    winston.info(JSON.stringify({
-                                        action: 'deleted',
-                                        file: outputFile,
-                                    }));
-                                }
-                            } catch (e) {
-                                winston.error(JSON.stringify({
-                                    type: 'cleanup',
-                                    message: e.toString(),
-                                }));
-                            }
-                        });
-                    })
-                    .save(outputFile);
-        });
-        return req.pipe(busboy);
     });
 }
 
-// Setup original short format endpoints for backward compatibility
-for (let prop in endpoints.types) {
-    if (endpoints.types.hasOwnProperty(prop)) {
-        setupConversionEndpoint('/' + prop, endpoints.types[prop]);
+// Configurar endpoints
+function setupEndpoints(availableEndpoints) {
+    // Configurar los endpoints de conversión basados en la lista
+    availableEndpoints.forEach(endpoint => {
+        if (endpoint.methods.includes('POST')) {
+            const path = endpoint.path;
+            let propName;
+            
+            // Determinar el nombre de la propiedad en el objeto endpoints.types
+            if (path.startsWith('/video/compress/to/')) {
+                const format = path.split('/').pop();
+                if (format === 'mp4' || format === 'webm') {
+                    propName = `compress-${format}`;
+                } else {
+                    propName = format; // Para hevc y av1
+                }
+            } else if (path.startsWith('/convert/')) {
+                const format = path.split('/').pop();
+                propName = format;
+            } else if (path.startsWith('/')) {
+                propName = path.substring(1); // Quitar el slash inicial
+            }
+            
+            // Si encontramos la propiedad, configurar el endpoint
+            if (propName && endpoints.types[propName]) {
+                setupConversionEndpoint(path, endpoints.types[propName]);
+            }
+        }
+    });
+    
+    // Configurar endpoints cortos (retrocompatibilidad)
+    for (let prop in endpoints.types) {
+        if (endpoints.types.hasOwnProperty(prop)) {
+            setupConversionEndpoint('/' + prop, endpoints.types[prop]);
+        }
     }
 }
 
+// Configurar endpoints para la documentación
 require('express-readme')(app, {
     filename: 'README.md',
     routes: ['/', '/readme'],
 });
 
+// Iniciar el servidor
 const server = app.listen(consts.port, function() {
-    let host = server.address().address;
-    let port = server.address().port;
+    const host = server.address().address;
+    const port = server.address().port;
     winston.info(JSON.stringify({
         action: 'listening',
         url: 'http://'+host+':'+port,
     }));
 });
 
+// Configurar timeouts para conexiones
 server.on('connection', function(socket) {
     winston.info(JSON.stringify({
         action: 'new connection',
@@ -336,6 +129,26 @@ server.on('connection', function(socket) {
     server.keepAliveTimeout = consts.timeout;
 });
 
+// Middleware para rutas no encontradas
 app.use(function(req, res, next) {
-  res.status(404).send(JSON.stringify({error: 'route not available'})+'\n');
+    res.status(404).json({
+        error: 'Route not available',
+        path: req.path,
+        method: req.method
+    });
+});
+
+// Manejador global de errores
+app.use(function(err, req, res, next) {
+    winston.error(JSON.stringify({
+        type: 'express_error',
+        path: req.path,
+        method: req.method,
+        message: err.toString()
+    }));
+    
+    res.status(500).json({
+        error: 'Internal server error',
+        message: err.message || 'An unexpected error occurred'
+    });
 });
