@@ -1,4 +1,4 @@
-FROM jrottenberg/ffmpeg:centos
+FROM jrottenberg/ffmpeg:ubuntu
 
 MAINTAINER Paul Visco <paul.visco@gmail.com>
 
@@ -17,10 +17,14 @@ MAINTAINER Paul Visco <paul.visco@gmail.com>
 #
 #####################################################################
 
-# Add the following two dependencies for nodejs
-RUN yum install -y git
-RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-RUN yum install -y nodejs npm --enablerepo=epel
+# Install Node.js and dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/local/src
 
@@ -31,8 +35,6 @@ RUN npm install -g fluent-ffmpeg
 # =================================
 WORKDIR /usr/local/
 RUN rm -rf /usr/local/src
-RUN yum clean all
-RUN rm -rf /var/cache/yum
 
 # =================================
 
@@ -48,6 +50,10 @@ RUN           npm -v
 #Create app dir
 RUN mkdir -p /usr/src/app
 WORKDIR /usr/src/app
+
+# Create uploads directory
+RUN mkdir -p /usr/src/app/uploads
+RUN chmod 777 /usr/src/app/uploads
 
 #Install Dependencies
 COPY package.json /usr/src/app

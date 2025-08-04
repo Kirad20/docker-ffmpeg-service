@@ -98,3 +98,32 @@ Test endpoints with curl:
 ```bash
 curl -F "file=@input.wav" 127.0.0.1:3000/mp3 > output.mp3
 ```
+
+## Deployment
+
+### CapRover Deployment
+The service includes configuration for deployment on CapRover, a self-hosted PaaS:
+
+1. **Required Files**:
+   - `captain-definition`: Points to the Dockerfile for building
+   - `.dockerignore`: Excludes unnecessary files from the build
+   - `DEPLOY-CAPROVER.md`: Detailed deployment instructions
+
+2. **Deployment Steps**:
+   ```bash
+   # Log in to CapRover
+   caprover login
+   
+   # Create a new app
+   caprover create
+   
+   # Deploy the application
+   caprover deploy
+   ```
+
+3. **Important Considerations**:
+   - Configure persistent storage for `/usr/src/app/uploads`
+   - Adjust resource allocation for video processing
+   - Set appropriate timeout values for large file uploads
+
+For complete deployment instructions, refer to `DEPLOY-CAPROVER.md`.
